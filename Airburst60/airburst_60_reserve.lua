@@ -1,9 +1,20 @@
 -- Airburst Launcher reserve ammo = 60
--- Arsenal-compatible Lua mod
--- Tries to locate weapon definitions and patch ammo values to 60.
+-- Arsenal-compatible Lua patch
+-- Goal: detect weapon entries whose ID/name contains "airburst" and set reserve ammo to 60
 
+local MOD_NAME = "Airburst60"
 local TARGET = "airburst"
 local RESERVE = 60
+
+local modState = {
+  backups = {},
+  patched = 0,
+  scanned = 0,
+}
+
+local function log(msg)
+  print("[" .. MOD_NAME .. "] " .. tostring(msg))
+end
 
 local function lowerString(value)
   if type(value) == "string" then
@@ -12,14 +23,28 @@ local function lowerString(value)
   return ""
 end
 
-local function setAmmoFields(obj)
+local function backupValue(owner, key, value)
+  if owner == nil or key == nil then
+    return
+  end
+
+  if owner.__airburst60_backup == nil then
+    owner.__airburst60_backup = {}
+  end
+
+  if owner.__airburst60_backup[key] == nil then
+    owner.__airburst60_backup[key] = value
+  end
+end
+
+local function setAmmoFields(obj, label)
   if type(obj) ~= "table" then
     return false
   end
 
-  local patched = false
+  local changed = false
 
-  local commonKeys = {
+  local numericFields = {
     "reserve_ammo",
     "total_ammo",
     "carried_ammo",
@@ -30,21 +55,23 @@ local function setAmmoFields(obj)
     "ammo_capacity",
     "ammoCapacity",
     "max_ammo",
-    "ammo_max",
-    "ammo"
+    "ammo_max"
   }
 
-  for _, key in ipairs(commonKeys) do
-    local value = obj[key]
-    if value ~= nil then
-      if type(value) == "number" then
-        obj[key] = RESERVE
-        patched = true
-      elseif type(value) == "table" then
-        for _, subKey in ipairs({"reserve", "total", "carried", "max", "capacity"}) do
-          if value[subKey] ~= nil then
-            value[subKey] = RESERVE
-            patched = true
+  for _, field in ipairs(numericFields) do
+    if obj[field] ~= nil then
+      if type(obj[field]) == "number" then
+        backupValue(obj, field, obj[field])
+        obj[field] = RESERVE
+        changed = true
+        log("Patched " .. tostring(label) .. "." .. field .. " -> " .. tostring(RESERVE))
+      elseif type(obj[field]) == "table" then
+        for _, sub in ipairs({"reserve", "total", "carried", "max", "capacity"}) do
+          if obj[field][sub] ~= nil then
+            backupValue(obj[field], sub, obj[field][sub])
+            obj[field][sub] = RESERVE
+            changed = true
+            log("Patched " .. tostring(label) .. "." .. field .. "." .. sub .. " -> " .. tostring(RESERVE))
           end
         end
       end
@@ -52,17 +79,21 @@ local function setAmmoFields(obj)
   end
 
   if type(obj.ammo) == "table" then
-    if obj.ammo.reserve ~= nil then obj.ammo.reserve = RESERVE; patched = true end
-    if obj.ammo.total ~= nil then obj.ammo.total = RESERVE; patched = true end
-    if obj.ammo.carried ~= nil then obj.ammo.carried = RESERVE; patched = true end
-    if obj.ammo.max ~= nil then obj.ammo.max = RESERVE; patched = true end
-    if obj.ammo.capacity ~= nil then obj.ammo.capacity = RESERVE; patched = true end
+    local ammo = obj.ammo
+    for _, sub in ipairs({"reserve", "total", "carried", "max", "capacity"}) do
+      if ammo[sub] ~= nil then
+        backupValue(ammo, sub, ammo[sub])
+        ammo[sub] = RESERVE
+        changed = true
+        log("Patched " .. tostring(label) .. ".ammo." .. sub .. " -> " .. tostring(RESERVE))
+      end
+    end
   end
 
-  return patched
+  return changed
 end
 
-local function isAirburstMatch(label, entry)
+local function isAirburstCandidate(label, entry)
   if type(entry) ~= "table" then
     return false
   end
@@ -73,42 +104,30 @@ local function isAirburstMatch(label, entry)
   local classText = lowerString(entry.class_name)
   local class = lowerString(entry.class)
 
-  if labelText:find(TARGET, 1, true) ~= nil then
-    return true
-  end
-  if nameText:find(TARGET, 1, true) ~= nil then
-    return true
-  end
-  if weaponText:find(TARGET, 1, true) ~= nil then
-    return true
-  end
-  if classText:find(TARGET, 1, true) ~= nil then
-    return true
-  end
-  if class:find(TARGET, 1, true) ~= nil then
-    return true
-  end
-
-  return false
+  return labelText:find(TARGET, 1, true) ~= nil
+    or nameText:find(TARGET, 1, true) ~= nil
+    or weaponText:find(TARGET, 1, true) ~= nil
+    or classText:find(TARGET, 1, true) ~= nil
+    or class:find(TARGET, 1, true) ~= nil
 end
 
-local function patchWeaponEntry(label, entry)
+local function tryPatchEntry(label, entry)
   if type(entry) ~= "table" then
     return false
   end
 
-  if isAirburstMatch(label, entry) then
-    if setAmmoFields(entry) then
-      print("[Airburst60] Patched weapon: " .. tostring(label))
+  if isAirburstCandidate(label, entry) then
+    if setAmmoFields(entry, tostring(label)) then
+      modState.patched = modState.patched + 1
       return true
     end
   end
 
   for k, v in pairs(entry) do
     if type(v) == "table" then
-      if isAirburstMatch(k, v) then
-        if setAmmoFields(v) then
-          print("[Airburst60] Patched nested weapon: " .. tostring(k))
+      if isAirburstCandidate(k, v) then
+        if setAmmoFields(v, tostring(k)) then
+          modState.patched = modState.patched + 1
           return true
         end
       end
@@ -118,71 +137,88 @@ local function patchWeaponEntry(label, entry)
   return false
 end
 
-local function scanAndPatch()
-  local patched = 0
-  local seen = {}
+local function walkTable(tab)
+  if type(tab) ~= "table" then
+    return
+  end
 
-  local function walk(tab)
-    if type(tab) ~= "table" or seen[tab] then
+  local seen = {}
+  local function inner(t)
+    if type(t) ~= "table" or seen[t] then
       return
     end
-    seen[tab] = true
+    seen[t] = true
 
-    for k, v in pairs(tab) do
+    for k, v in pairs(t) do
+      modState.scanned = modState.scanned + 1
       if type(v) == "table" then
-        if patchWeaponEntry(k, v) then
-          patched = patched + 1
-        end
-        walk(v)
+        tryPatchEntry(k, v)
+        inner(v)
       end
     end
   end
 
-  local candidateTables = {
-    _G.Weapons,
-    _G.WeaponDatabase,
-    _G.WeaponDefs,
-    _G.WeaponTable,
-    _G.ItemDB,
-    _G.ItemTable,
-    _G.GameData and _G.GameData.Weapons,
-    _G.GameData and _G.GameData.WeaponDefs,
-    _G.GameData and _G.GameData.WeaponTable,
-    _G.GameData and _G.GameData.ItemDB
-  }
+  inner(tab)
+end
 
-  for _, tbl in ipairs(candidateTables) do
+local function findCandidateTables()
+  local list = {}
+
+  local push = function(value)
+    if value and type(value) == "table" then
+      table.insert(list, value)
+    end
+  end
+
+  push(_G.Weapons)
+  push(_G.WeaponDatabase)
+  push(_G.WeaponDefs)
+  push(_G.WeaponTable)
+  push(_G.ItemDB)
+  push(_G.ItemTable)
+  push(_G.GameData and _G.GameData.Weapons)
+  push(_G.GameData and _G.GameData.WeaponDefs)
+  push(_G.GameData and _G.GameData.WeaponTable)
+  push(_G.GameData and _G.GameData.ItemDB)
+
+  return list
+end
+
+local function runPatch()
+  modState.patched = 0
+  modState.scanned = 0
+
+  for _, tbl in ipairs(findCandidateTables()) do
     if type(tbl) == "table" then
       for k, v in pairs(tbl) do
         if type(v) == "table" then
-          if patchWeaponEntry(k, v) then
-            patched = patched + 1
-          end
+          tryPatchEntry(k, v)
         end
       end
     end
   end
 
-  walk(_G)
-  print("[Airburst60] Scan complete. Patched count: " .. tostring(patched))
+  walkTable(_G)
+
+  log("Scan complete. patched=" .. tostring(modState.patched) .. ", scanned=" .. tostring(modState.scanned))
 end
 
 if type(RegisterForEvent) == "function" then
   RegisterForEvent("OnGameInit", function()
-    scanAndPatch()
+    runPatch()
   end)
 end
 
 if type(AddCallback) == "function" then
   AddCallback("OnGameLoaded", function()
-    scanAndPatch()
+    runPatch()
   end)
 end
 
 if type(on_init) == "function" then
   on_init(function()
-    scanAndPatch()
+    runPatch()
   end)
 end
 
-scanAndPatch()
+runPatch()

@@ -1,16 +1,20 @@
 Airburst Launcher 60 Reserve Mod
 ================================
 
-This mod attempts to set the Airburst Launcher reserve ammo to 60.
+This mod attempts to detect weapons whose name / ID contains "airburst" and sets their reserve ammo to 60.
 
-How to install:
-1. Download the ZIP from the repository (main branch) or clone the repo.
-2. Unzip the folder so you have a directory named `Airburst60` containing the files.
-3. Place the `Airburst60` folder into your Arsenal mods directory (where you usually put mods).
-4. Launch Arsenal, enable the mod, then start Helldivers 2.
+Install:
+1. Put the `Airburst60` folder into your Arsenal mod directory.
+2. Make sure the mod is enabled in Arsenal.
+3. Launch Helldivers 2 and check whether the Airburst Launcher now carries 60 reserve ammo.
 
 Notes:
-- This is a Lua runtime patch. It tries to locate weapon definitions and patch ammo fields automatically.
-- Depending on the game data structure, some weapons may use different field names such as reserveAmmo, totalAmmo, or ammo.reserve. If the launcher is not detected, edit `airburst_60_reserve.lua` and adjust target name or field names to match your game build.
-- Use this in single-player or private matches. Modding online/multiplayer can cause anti-cheat or server issues.
+- This is a Lua runtime patch designed for Arsenal-based mod loading.
+- It scans common weapon tables and global tables to identify the Airburst entry.
+- If your current game build uses slightly different field names (for example `reserveAmmo`, `ammo.reserve`, or another custom schema), the script will still attempt to patch the common variants automatically.
+- If the mod does not work, the next step is to send the exact weapon table entry or game ID to match the real structure more precisely.
+
+Compatibility:
+- Intended for PC use.
+- Best tested in single-player or private sessions before using in multiplayer.
 

@@ -1,7 +1,7 @@
 {
   "name": "Airburst Launcher 60 Reserve",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "YK41s7",
-  "description": "Sets the Airburst Launcher reserve ammo to 60",
+  "description": "Sets the Airburst Launcher reserve ammo to 60 using a safer Arsenal-compatible Lua patch.",
   "entry": "airburst_60_reserve.lua"
 }
