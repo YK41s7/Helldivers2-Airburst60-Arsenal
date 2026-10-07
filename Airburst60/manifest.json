@@ -1,0 +1,7 @@
+{
+  "name": "Airburst Launcher 60 Reserve",
+  "version": "1.0.0",
+  "author": "YK41s7",
+  "description": "Sets the Airburst Launcher reserve ammo to 60",
+  "entry": "airburst_60_reserve.lua"
+}
